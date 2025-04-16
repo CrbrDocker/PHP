@@ -1,0 +1,12 @@
+FROM crbrdocker/debian:bookworm
+
+COPY --chmod=755 ./install-php.sh /install-php.sh
+RUN /install-php.sh
+RUN rm -f /install-php.sh
+
+ENTRYPOINT ["docker-php-entrypoint"]
+STOPSIGNAL SIGWINCH
+WORKDIR /srv/www
+EXPOSE 80/tcp
+EXPOSE 443/tcp
+CMD ["apache2-foreground"]
