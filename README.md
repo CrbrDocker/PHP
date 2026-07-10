@@ -58,7 +58,8 @@ Everything is driven by `.github/workflows/build.yml`:
 5. **cleanup** — prune untagged GHCR versions.
 
 Triggers: any push to `main`, weekly `cron 50 8 * * 2`, or manual *Run workflow*
-(optional `min_php`).
+(optional `min_php`; `force` toggle, default on, builds all resolved versions
+even when the gate sees no change).
 
 `install-php.sh` is copied into the image and run once at build time; it takes the
 target version from `$PHP_VERSION` and derives the sury repo codename from the base

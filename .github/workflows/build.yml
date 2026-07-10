@@ -16,6 +16,10 @@ on:
         description: "Lowest PHP version to build (blank = repo var MIN_PHP, else 8.3)"
         required: false
         default: ""
+      force:
+        description: "Force rebuild even if the gate says nothing changed"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -84,8 +88,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: g
+        env:
+          FORCE: ${{ github.event.inputs.force }}
         run: |
           set -euo pipefail
+          if [ "$FORCE" = "true" ]; then
+            out='${{ needs.resolve.outputs.matrix }}'
+            echo "manual run with force=true — building all resolved versions: $out"
+            echo "matrix=$out" | tee -a "$GITHUB_OUTPUT"
+            [ "$(echo "$out" | jq 'length')" -gt 0 ] && echo "any=true" >> "$GITHUB_OUTPUT" || echo "any=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           out="[]"
           for v in $(echo '${{ needs.resolve.outputs.matrix }}' | jq -r '.[]'); do
             echo "::group::gate php ${v}"
