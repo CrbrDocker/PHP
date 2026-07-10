@@ -1,14 +1,23 @@
 #! /bin/bash
 #
-# Script to install an Apache / PHP 8.3 server on debian bookworm
+# Script to install an Apache / PHP server on the crbr Debian base.
+# The PHP version is parameterized via $PHP_VERSION (e.g. 8.3, 8.4, 8.5) and the
+# Debian codename for the sury repo is read from the base image's os-release,
+# so this single script serves every version/codename combination.
 
 
+# PHP version to install (default 8.3 for backward compat)
+PHP_VERSION="${PHP_VERSION:-8.3}"
 
 
 # APT
+# sury repo, per Debian codename, with a verified signing key (instead of the
+# old trusted=yes / allow-insecure).
+codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+curl -sSLo /usr/share/keyrings/deb.sury.org-php.gpg https://packages.sury.org/php/apt.gpg
 cat > /etc/apt/sources.list.d/php-sury.list <<EOF
 # PHP recent
-deb [allow-insecure=yes trusted=yes] https://packages.sury.org/php/ bookworm main
+deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ ${codename} main
 EOF
 
 # env var pour que APT sache qu'on ne va pas lui repondre
@@ -20,13 +29,13 @@ apt -y update
 apt-get -y dist-upgrade
 
 # Installation apache & modules
-apt-get -y --no-install-recommends install apache2 libapache2-mod-php8.3 php8.3-apcu php8.3-bcmath php8.3-bz2 php8.3-cli php8.3-common php8.3-curl php8.3-dba php8.3-gd php8.3-grpc php8.3-igbinary php8.3-imagick php8.3-ldap php8.3-mbstring php8.3-memcached php8.3-memcache php8.3-msgpack php8.3-mysql php8.3-odbc php8.3-opcache php8.3-readline php8.3-redis php8.3-soap php8.3-sqlite3 php8.3-sybase php8.3-tidy php8.3-xml php8.3-xmlrpc php8.3-zip php-common
+apt-get -y --no-install-recommends install apache2 libapache2-mod-php${PHP_VERSION} php${PHP_VERSION}-apcu php${PHP_VERSION}-bcmath php${PHP_VERSION}-bz2 php${PHP_VERSION}-cli php${PHP_VERSION}-common php${PHP_VERSION}-curl php${PHP_VERSION}-dba php${PHP_VERSION}-gd php${PHP_VERSION}-grpc php${PHP_VERSION}-igbinary php${PHP_VERSION}-imagick php${PHP_VERSION}-ldap php${PHP_VERSION}-mbstring php${PHP_VERSION}-memcached php${PHP_VERSION}-memcache php${PHP_VERSION}-msgpack php${PHP_VERSION}-mysql php${PHP_VERSION}-odbc php${PHP_VERSION}-opcache php${PHP_VERSION}-readline php${PHP_VERSION}-redis php${PHP_VERSION}-soap php${PHP_VERSION}-sqlite3 php${PHP_VERSION}-sybase php${PHP_VERSION}-tidy php${PHP_VERSION}-xml php${PHP_VERSION}-xmlrpc php${PHP_VERSION}-zip php-common
 
 # Tant qu'on est y est composer aussi ... (et il lui faut php8.3-intl, sinon il met php8.4-intl & php8.4-common...)
-apt-get -y --no-install-recommends install php8.3-intl composer
+apt-get -y --no-install-recommends install php${PHP_VERSION}-intl composer
 
 
-# Nettoyage du cache APT 
+# Nettoyage du cache APT
 apt-get clean
 apt-get autoclean
 
@@ -94,16 +103,16 @@ cat >> /etc/apache2/envvars <<EOF
 
 EOF
 
-# Conf PHP : 
-for fichier in /etc/php/8.3/apache2/php.ini /etc/php/8.3/cli/php.ini ; do
+# Conf PHP :
+for fichier in /etc/php/${PHP_VERSION}/apache2/php.ini /etc/php/${PHP_VERSION}/cli/php.ini ; do
   sed -i -e "s/^variables_order.*/variables_order = \"EGPCS\"/" $fichier
   sed -i -e "s/^;date\.timezone.*/date.timezone = Europe\/Paris/" $fichier
   sed -i -e "s/^expose_php.*/expose_php = Off/" $fichier
   sed -i -e "s/^post_max_size.*/post_max_size = 80M/" $fichier
   sed -i -e "s/^upload_max_filesize.*/upload_max_filesize = 20M/" $fichier
   #sed -i -e "s/^session\.use_only_cookies.*/session.use_only_cookies = 0/" $fichier
- 
-  # Il y aurait des trucs a faire pour les sessions en memcache mais pour machine de dev on va s'en passer 
+
+  # Il y aurait des trucs a faire pour les sessions en memcache mais pour machine de dev on va s'en passer
   # Et pour le reste, display errors & co, le defaut debian est bon pour l'instant
 done
 
@@ -586,4 +595,3 @@ chmod 755 /usr/local/bin/apache2-foreground
 rm -rf /tmp/* /var/tmp/* 2> /dev/null
 find /var/log -type f -delete
 find /srv/log -type f -delete
-

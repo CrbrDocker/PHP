@@ -1,0 +1,223 @@
+name: build-apache-php
+
+# Weekly rebuild of the Apache/PHP images, plus pushes and manual runs. The set
+# of PHP versions is resolved live from the sury repo (every php<maj>.<min> it
+# ships for the current stable codename, at or above MIN_PHP), so new minor
+# versions are picked up automatically and dropped ones stop building. The gate
+# then keeps a scheduled run from rebuilding/pushing versions that didn't change.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "26 4 * * 2"   # Tuesday, staggered after the base image (17) + redis (20) + memcached (23)
+  workflow_dispatch:
+    inputs:
+      min_php:
+        description: "Lowest PHP version to build (blank = repo var MIN_PHP, else 8.3)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BASE_IMAGE: crbrdocker/debian:stable
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Resolve the PHP versions to build: read the current stable codename from
+  # Debian's Release file, then list every php<maj>.<min> metapackage sury
+  # ships for that codename, keeping those >= MIN_PHP. Also lowercase the owner.
+  # --------------------------------------------------------------------------
+  resolve:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.r.outputs.matrix }}
+      owner: ${{ steps.r.outputs.owner }}
+    env:
+      MIN_PHP: ${{ github.event.inputs.min_php || vars.MIN_PHP || '8.3' }}
+    steps:
+      - id: r
+        run: |
+          set -euo pipefail
+          codename=$(curl -sfL "https://deb.debian.org/debian/dists/stable/Release" | sed -n 's/^Codename: //p')
+          [ -n "$codename" ] || { echo "could not resolve stable codename" >&2; exit 1; }
+          all=$(curl -sfL "https://packages.sury.org/php/dists/${codename}/main/binary-amd64/Packages.gz" \
+            | gunzip | sed -n 's/^Package: php\([0-9][0-9]*\.[0-9][0-9]*\)$/\1/p' | sort -uV)
+          keep=()
+          for v in $all; do
+            # keep v when MIN_PHP sorts first, i.e. v >= MIN_PHP (version-aware)
+            if [ "$(printf '%s\n%s\n' "$MIN_PHP" "$v" | sort -V | head -n1)" = "$MIN_PHP" ]; then
+              keep+=("$v")
+            fi
+          done
+          if [ "${#keep[@]}" -eq 0 ]; then
+            matrix="[]"
+          else
+            matrix=$(printf '%s\n' "${keep[@]}" | jq -R . | jq -cs .)
+          fi
+          echo "stable codename: ${codename} | MIN_PHP: ${MIN_PHP} | versions: ${keep[*]:-none}"
+          echo "matrix=$matrix" | tee -a "$GITHUB_OUTPUT"
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+  # --------------------------------------------------------------------------
+  # Per-version gate: keep only the versions that actually need a rebuild.
+  # --------------------------------------------------------------------------
+  gate:
+    needs: resolve
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.g.outputs.matrix }}
+      any: ${{ steps.g.outputs.any }}
+    env:
+      GHCR_IMAGE: ghcr.io/${{ needs.resolve.outputs.owner }}/apache-php
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: g
+        run: |
+          set -euo pipefail
+          out="[]"
+          for v in $(echo '${{ needs.resolve.outputs.matrix }}' | jq -r '.[]'); do
+            echo "::group::gate php ${v}"
+            res=$(IMAGE="${GHCR_IMAGE}:${v}" VCS_REF="${{ github.sha }}" BASE_IMAGE="${BASE_IMAGE}" ./need_rebuild.sh || true)
+            echo "$res"
+            echo "::endgroup::"
+            if echo "$res" | grep -q '^REBUILD=true'; then
+              out=$(echo "$out" | jq -c ". + [\"$v\"]")
+            fi
+          done
+          echo "matrix=$out" | tee -a "$GITHUB_OUTPUT"
+          [ "$(echo "$out" | jq 'length')" -gt 0 ] && echo "any=true" >> "$GITHUB_OUTPUT" || echo "any=false" >> "$GITHUB_OUTPUT"
+
+  # --------------------------------------------------------------------------
+  # Build each needed version natively per arch and push per-arch tags.
+  # --------------------------------------------------------------------------
+  build:
+    needs: [resolve, gate]
+    if: needs.gate.outputs.any == 'true'
+    runs-on: ${{ matrix.arch.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ${{ fromJSON(needs.gate.outputs.matrix) }}
+        arch:
+          - { name: amd64, runner: ubuntu-24.04 }
+          - { name: arm64, runner: ubuntu-24.04-arm }
+    env:
+      GHCR_IMAGE: ghcr.io/${{ needs.resolve.outputs.owner }}/apache-php
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/apache-php
+      SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build & push per-arch image (OCI + attestations)
+        env:
+          PHP_VERSION: ${{ matrix.php }}
+          ARCH_NAME: ${{ matrix.arch.name }}
+          VCS_REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          base_digest=$(docker buildx imagetools inspect "$BASE_IMAGE" --format '{{ .Manifest.Digest }}')
+          tags=(-t "${GHCR_IMAGE}:${PHP_VERSION}-${ARCH_NAME}")
+          [ -n "$DOCKERHUB_USERNAME" ] && tags+=(-t "${DOCKERHUB_IMAGE}:${PHP_VERSION}-${ARCH_NAME}")
+          docker buildx build . -f Dockerfile \
+            --platform "linux/${ARCH_NAME}" \
+            "${tags[@]}" \
+            --output type=image,oci-mediatypes=true,push=true \
+            --attest type=provenance,mode=max \
+            --attest type=sbom \
+            --build-arg "PHP_VERSION=${PHP_VERSION}" \
+            --build-arg "IMAGE_VERSION=${PHP_VERSION}" \
+            --build-arg "IMAGE_REVISION=${VCS_REF}" \
+            --build-arg "IMAGE_CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --build-arg "IMAGE_SOURCE=${SOURCE_URL}" \
+            --build-arg "BASE_DIGEST=${base_digest}"
+
+  # --------------------------------------------------------------------------
+  # Merge the per-arch tags into the version tag, per registry.
+  # --------------------------------------------------------------------------
+  manifest:
+    needs: [resolve, gate, build]
+    if: needs.gate.outputs.any == 'true'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ${{ fromJSON(needs.gate.outputs.matrix) }}
+    env:
+      GHCR_IMAGE: ghcr.io/${{ needs.resolve.outputs.owner }}/apache-php
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/apache-php
+      SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+      - name: Create multi-arch manifest
+        env:
+          PHP_VERSION: ${{ matrix.php }}
+        run: |
+          set -euo pipefail
+          push_manifest() {  # $1 = image repo
+            local repo="$1"
+            docker buildx imagetools create \
+              --annotation "index:org.opencontainers.image.description=Apache + PHP ${PHP_VERSION} on the crbr Debian base image" \
+              --annotation "index:org.opencontainers.image.source=${SOURCE_URL}" \
+              -t "${repo}:${PHP_VERSION}" \
+              "${repo}:${PHP_VERSION}-amd64" "${repo}:${PHP_VERSION}-arm64"
+          }
+          push_manifest "$GHCR_IMAGE"
+          if [ -n "$DOCKERHUB_USERNAME" ]; then
+            push_manifest "$DOCKERHUB_IMAGE"
+          fi
+
+  # --------------------------------------------------------------------------
+  # Prune untagged GHCR versions left behind by overwritten tags (multi-arch
+  # aware). Docker Hub is tag-centric and self-GCs.
+  # --------------------------------------------------------------------------
+  cleanup:
+    needs: [resolve, gate, manifest]
+    if: needs.gate.outputs.any == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: Prune untagged GHCR versions
+        uses: dataaxiom/ghcr-cleanup-action@v1.2.2
+        with:
+          owner: ${{ needs.resolve.outputs.owner }}
+          packages: apache-php
+          delete-untagged: true
+          token: ${{ secrets.GITHUB_TOKEN }}
