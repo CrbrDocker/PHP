@@ -58,7 +58,7 @@ Everything is driven by `.github/workflows/build.yml`:
 4. **manifest** — merge the per-arch tags into `:<ver>`.
 5. **cleanup** — prune untagged GHCR versions.
 
-Triggers: any push to `main`, weekly `cron 26 4 * * 2`, or manual *Run workflow*
+Triggers: any push to `main`, weekly `cron 50 8 * * 2`, or manual *Run workflow*
 (optional `min_php`).
 
 `install-php.sh` is copied into the image and run once at build time; it takes the
