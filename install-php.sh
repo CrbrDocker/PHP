@@ -83,22 +83,14 @@ EOF
 
 # Variables d'environnement
 cat > /etc/environment <<EOF
-TZ=Europe/Paris
-ENVIRONMENT=dev
-PLATFORM=dev
-PLATFORM_URL=dev.
-LIB_INCLUDE_PATH=/srv/www/lib/clean
-LEGACY_LIB_INCLUDE_PATH=/srv/www/lib/legacy
+#TZ=Europe/Paris
 
 EOF
 
 cat >> /etc/apache2/envvars <<EOF
 
 ### Env Vars - Because Apache does not use /etc/environment...
-#export PLATFORM=dev
-#export PLATFORM_URL=dev.
-#export LIB_INCLUDE_PATH=/srv/www/lib/clean
-#export LEGACY_LIB_INCLUDE_PATH=/srv/www/lib/legacy
+
 ### DOn't care here.
 
 EOF
@@ -106,7 +98,8 @@ EOF
 # Conf PHP :
 for fichier in /etc/php/${PHP_VERSION}/apache2/php.ini /etc/php/${PHP_VERSION}/cli/php.ini ; do
   sed -i -e "s/^variables_order.*/variables_order = \"EGPCS\"/" $fichier
-  sed -i -e "s/^;date\.timezone.*/date.timezone = Europe\/Paris/" $fichier
+  #sed -i -e "s/^;date\.timezone.*/date.timezone = Europe\/Paris/" $fichier
+  sed -i -e "s/^;date\.timezone.*/date.timezone = UTC/" $fichier
   sed -i -e "s/^expose_php.*/expose_php = Off/" $fichier
   sed -i -e "s/^post_max_size.*/post_max_size = 80M/" $fichier
   sed -i -e "s/^upload_max_filesize.*/upload_max_filesize = 20M/" $fichier
