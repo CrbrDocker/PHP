@@ -35,12 +35,11 @@ A self-signed SSL certificate covering the `vhost_alias` names (signed by our de
 CA) is installed at `/etc/apache2/ssl/dev.crt` / `dev.key`. Override `/srv/www`
 and/or `/etc/apache2/sites-enabled` as needed.
 
-Baked-in environment (in `/etc/environment`): `TZ=Europe/Paris`,
-`ENVIRONMENT=dev`, `PLATFORM=dev`, `PLATFORM_URL=dev.`,
-`LIB_INCLUDE_PATH=/srv/www/lib/clean`,
-`LEGACY_LIB_INCLUDE_PATH=/srv/www/lib/legacy`. PHP is set with
-`variables_order=EGPCS`, `date.timezone=Europe/Paris`, `expose_php=Off`,
-`post_max_size=80M`, `upload_max_filesize=20M`.
+No environment is baked in `/etc/environment` (the old `ENVIRONMENT`/`PLATFORM`/
+`LIB_INCLUDE_PATH` dev vars and `TZ` are left commented) — set what you need at
+`docker run` time. PHP is set with `variables_order=EGPCS`,
+`date.timezone=UTC`, `expose_php=Off`, `post_max_size=80M`,
+`upload_max_filesize=20M`.
 
 > TODO (carried from the old README): env vars to override the whole config at
 > run time.
