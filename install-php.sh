@@ -20,7 +20,7 @@ cat > /etc/apt/sources.list.d/php-sury.list <<EOF
 deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ ${codename} main
 EOF
 
-# env var pour que APT sache qu'on ne va pas lui repondre
+# env var so APT knows we won't answer any of its prompts
 export DEBIAN_FRONTEND=noninteractive
 export DEBIAN_PRIORITY=critical
 
@@ -31,20 +31,20 @@ apt-get -y dist-upgrade
 # Installation apache & modules
 apt-get -y --no-install-recommends install apache2 libapache2-mod-php${PHP_VERSION} php${PHP_VERSION}-apcu php${PHP_VERSION}-bcmath php${PHP_VERSION}-bz2 php${PHP_VERSION}-cli php${PHP_VERSION}-common php${PHP_VERSION}-curl php${PHP_VERSION}-dba php${PHP_VERSION}-gd php${PHP_VERSION}-grpc php${PHP_VERSION}-igbinary php${PHP_VERSION}-imagick php${PHP_VERSION}-ldap php${PHP_VERSION}-mbstring php${PHP_VERSION}-memcached php${PHP_VERSION}-memcache php${PHP_VERSION}-msgpack php${PHP_VERSION}-mysql php${PHP_VERSION}-odbc php${PHP_VERSION}-opcache php${PHP_VERSION}-readline php${PHP_VERSION}-redis php${PHP_VERSION}-soap php${PHP_VERSION}-sqlite3 php${PHP_VERSION}-sybase php${PHP_VERSION}-tidy php${PHP_VERSION}-xml php${PHP_VERSION}-xmlrpc php${PHP_VERSION}-zip php-common
 
-# Tant qu'on est y est composer aussi ... (et il lui faut php8.3-intl, sinon il met php8.4-intl & php8.4-common...)
+# While we're at it, composer too ... (it needs php8.3-intl, otherwise it pulls php8.4-intl & php8.4-common...)
 apt-get -y --no-install-recommends install php${PHP_VERSION}-intl composer
 
 
-# Nettoyage du cache APT
+# APT cache cleanup
 apt-get clean
 apt-get autoclean
 
-# Nettoyage liste APT (90 Mo) et cache archives (idem)
-# Il faudra faire un apt-get update avant prochain usage
+# Clean APT lists (~90 MB) and the archive cache (likewise)
+# An apt-get update will be needed before next use
 rm -rf /var/lib/apt/lists/* 2>/dev/null
 rm -rf /var/cache/apt/*pkgcache.bin 2>/dev/null
 
-# Les repertoires
+# The directories
 mkdir -p /srv/log /srv/www /srv/www/default/public
 mv /var/log/apache2 /srv/log && ln -s /srv/log/apache2 /var/log
 echo coucou > /srv/www/default/public/index.php
@@ -52,8 +52,8 @@ echo coucou > /srv/www/default/public/index.php
 
 
 
-# Gestion des fichiers de log.
-# (Pas vraiment necessaire pour docker ou logrotate tourne pas)
+# Log file management.
+# (Not really needed on docker where logrotate doesn't run)
 cat > /etc/logrotate.d/apache2 <<EOF
 /var/log/apache2/*.log {
 	daily
@@ -81,7 +81,7 @@ EOF
 
 
 
-# Variables d'environnement
+# Environment variables
 cat > /etc/environment <<EOF
 #TZ=Europe/Paris
 
@@ -95,7 +95,7 @@ cat >> /etc/apache2/envvars <<EOF
 
 EOF
 
-# Conf PHP :
+# PHP config:
 for fichier in /etc/php/${PHP_VERSION}/apache2/php.ini /etc/php/${PHP_VERSION}/cli/php.ini ; do
   sed -i -e "s/^variables_order.*/variables_order = \"EGPCS\"/" $fichier
   #sed -i -e "s/^;date\.timezone.*/date.timezone = Europe\/Paris/" $fichier
@@ -105,15 +105,15 @@ for fichier in /etc/php/${PHP_VERSION}/apache2/php.ini /etc/php/${PHP_VERSION}/c
   sed -i -e "s/^upload_max_filesize.*/upload_max_filesize = 20M/" $fichier
   #sed -i -e "s/^session\.use_only_cookies.*/session.use_only_cookies = 0/" $fichier
 
-  # Il y aurait des trucs a faire pour les sessions en memcache mais pour machine de dev on va s'en passer
-  # Et pour le reste, display errors & co, le defaut debian est bon pour l'instant
+  # There would be things to set up for memcache-backed sessions but for a dev box we'll skip it
+  # And for the rest, display errors & co, the debian default is fine for now
 done
 
 
 
-# conf apache
+# apache config
 
-## Conf SSL
+## SSL config
 mkdir /etc/apache2/ssl
 
 cat > /etc/apache2/ssl/dev.crt <<EOF
@@ -174,10 +174,10 @@ Qpri7x5m91EnksWTgh3biQ==
 -----END PRIVATE KEY-----
 EOF
 
-## La conf de base (note : concurrence & co fortement baisse par rapport au standard)
+## The base config (note: concurrency & co greatly reduced vs the standard)
 cat > /etc/apache2/conf-available/crbr.conf<<EOF
 
-### Conf de base, nombre de threads n co
+### Base config, number of threads & co
 
 ServerAdmin hostmaster@myserver.net
 
@@ -199,8 +199,8 @@ KeepAliveTimeout        1
 </IfModule>
 
 
-### Sharing des sessions SSL dans Memcache pour serveurs load balances
-# Override de la conf par defaut dans ssl.conf (shared memory sur le server)
+### Sharing SSL sessions in Memcache for load-balanced servers
+# Override the default conf in ssl.conf (shared memory on the server)
 <IfModule mod_socache_memcache.c>
     SSLSessionCache memcache:memcached-session:11211
 </IfModule>
@@ -214,66 +214,38 @@ KeepAliveTimeout        1
     SSLHonorCipherOrder     on
     SSLSessionTickets       off
 
-   # Notes : volontairement pas mis les options de use stapling. Ca ne fonctionne pas bien avec certificat intermedaire
+   # Notes: deliberately left out the OCSP stapling options. They don't work well with an intermediate certificate
 </IfModule>
 
 
-### Directives des Log
+### Log directives
 LogLevel warn
-#deja dans apache2.conf#ErrorLog /srv/log/apache2/error.log
+#already in apache2.conf#ErrorLog /srv/log/apache2/error.log
 
 <IfModule !mod_remoteip.c>
-    # Si on n'a pas configure mod_remote_ip & cloudflare
-    # On garde l'ancienne conf
+    # If we haven't configured mod_remote_ip & cloudflare
+    # We keep the old conf
 
     # Log Format Normal
     LogFormat "%v:%p %h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %V %D %I %O" vcombined
 
-    # Log format pour requetes SOAP (remplace le referer par la soap action)
+    # Log format for SOAP requests (replaces the referer with the soap action)
     LogFormat "%v:%p %h %l %u %t \"%r\" %>s %b \"%{SOAPAction}i\" \"%{User-Agent}i\" %V %D %I %O" vcombinedsoap
 
     # Log format for lines with GDPR crap in the GET request that we need to not log...
     LogFormat "%v:%p %h %l %u %t \"%m %U HTTP/1.1\" %>s %b \"-\" \"%{User-Agent}i\" %V %D %I %O" vcombinednoquerystring
 </IfModule>
 <IfModule mod_remoteip.c>
-    # Si on utilise cloudflare et qu'on a active mod_remote_ip a la place du vieux mod_cloudflare (plus maintenu)
-
-    RemoteIPHeader CF-Connecting-IP
-
-    # IPv4 de Cloudflare
-    RemoteIPInternalProxy 173.245.48.0/20
-    RemoteIPInternalProxy 103.21.244.0/22
-    RemoteIPInternalProxy 103.22.200.0/22
-    RemoteIPInternalProxy 103.31.4.0/22
-    RemoteIPInternalProxy 141.101.64.0/18
-    RemoteIPInternalProxy 108.162.192.0/18
-    RemoteIPInternalProxy 190.93.240.0/20
-    RemoteIPInternalProxy 188.114.96.0/20
-    RemoteIPInternalProxy 197.234.240.0/22
-    RemoteIPInternalProxy 198.41.128.0/17
-    RemoteIPInternalProxy 162.158.0.0/15
-    RemoteIPInternalProxy 104.16.0.0/13
-    RemoteIPInternalProxy 104.24.0.0/14
-    RemoteIPInternalProxy 172.64.0.0/13
-    RemoteIPInternalProxy 131.0.72.0/22
-
-
-    # IPv6 de Cloudflare
-    RemoteIPInternalProxy 2400:cb00::/32
-    RemoteIPInternalProxy 2606:4700::/32
-    RemoteIPInternalProxy 2803:f800::/32
-    RemoteIPInternalProxy 2405:b500::/32
-    RemoteIPInternalProxy 2405:8100::/32
-    RemoteIPInternalProxy 2a06:98c0::/29
-    RemoteIPInternalProxy 2c0f:f248::/32
-
-    # Liste des IPs: https://www.cloudflare.com/ips/
-    # La conf avec mod remoteip : https://support.cloudflare.com/hc/en-us/articles/200170786-Restoring-original-visitor-IPs#JUxJSMn3Ht5c5yq
+    # Cloudflare real-IP trust (RemoteIPHeader + RemoteIPInternalProxy) lives in
+    # conf-available/cloudflare-ips.conf, seeded at build time and refreshed at
+    # container start by crbr-update-cloudflare-ips.sh (baked fallback if offline).
+    # mod_remoteip only honours CF-Connecting-IP when the peer is a trusted proxy;
+    # otherwise the real connection IP is kept.
 
     # Log Format Normal
     LogFormat "%v:%p %a %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %V %D %I %O" vcombined
 
-    # Log format pour requetes SOAP (remplace le referer par la soap action)
+    # Log format for SOAP requests (replaces the referer with the soap action)
     LogFormat "%v:%p %a %l %u %t \"%r\" %>s %b \"%{SOAPAction}i\" \"%{User-Agent}i\" %V %D %I %O" vcombinedsoap
 
     # Log format for lines with GDPR crap in the GET request that we need to not log...
@@ -292,7 +264,7 @@ CustomLog /srv/log/apache2/access.log vcombinednoquerystring expr=(reqenv('notso
 CustomLog /srv/log/apache2/access.log vcombinedsoap expr=(reqenv('notsoapaction')!='yes')
 
 
-### Securite
+### Security
 ServerTokens Prod
 ServerSignature Off
 TraceEnable Off
@@ -340,8 +312,8 @@ TraceEnable Off
     </Proxy>
     ProxyVia Off
 
-    # Celui-la n'est pas set par ProxyAddHeaders
-    #  Si on n'a rien, on le met nous meme, http en http et https en https
+    # This one isn't set by ProxyAddHeaders
+    #  If we have nothing, we set it ourselves, http as http and https as https
     SetEnvIfNoCase ^CloudFront-Forwarded-Proto$ (.+) CloudFront=$1
     RequestHeader setifempty X-Forwarded-Proto %{CloudFront}e env=CloudFront
     RequestHeader setifempty X-Forwarded-Proto expr=%{REQUEST_SCHEME} env=!CloudFront
@@ -351,14 +323,14 @@ EOF
 
 #sed -i -e "s/^ServerSignature.*/ServerSignature Off/" /etc/apache2/conf-available/security.conf
 #sed -i -e "s/^ServerTokens.*/ServerTokens Prod/" /etc/apache2/conf-available/security.conf
-# Remplace par a2disconf security et le reste dans crbr.conf
+# Replaced by a2disconf security and the rest in crbr.conf
 
 ## Modules
 a2dismod access_compat
-a2enmod authnz_ldap headers ldap proxy_http rewrite ssl vhost_alias
+a2enmod authnz_ldap headers ldap proxy_http remoteip rewrite ssl vhost_alias
 
 
-## activation / desactivation de confs
+## enable / disable confs
 a2disconf security
 a2disconf other-vhosts-access-log
 a2disconf charset
@@ -367,7 +339,92 @@ a2disconf serve-cgi-bin
 a2enconf crbr
 
 
-## site "par defaut"
+## Cloudflare trusted-proxy list for mod_remoteip.
+## The script below regenerates conf-available/cloudflare-ips.conf from the live
+## Cloudflare ranges (with a baked fallback). We seed it now at build time and
+## call it again at container start from the entrypoint.
+cat > /usr/local/bin/crbr-update-cloudflare-ips.sh <<'CFEOF'
+#!/bin/bash
+#
+# crbr-update-cloudflare-ips.sh
+#
+# (Re)generate the Cloudflare trusted-proxy list for mod_remoteip. Run once at
+# image build to seed the config, then again at container start (from
+# docker-php-entrypoint) so a changed Cloudflare range is picked up automatically.
+#
+# It fetches cloudflare.com/ips-v4 + ips-v6; if that fails or returns something
+# that does not look like CIDRs, it falls back to the baked list below, so the
+# trusted list is never emptied.
+#
+# TRUST_PRIVATE_PROXIES=1 additionally trusts RFC1918 ranges (10/8, 172.16/12,
+# 192.168/16) -- needed when Apache sits behind a private-IP reverse proxy / LB
+# that forwards CF-Connecting-IP. Leave unset/0 for a direct Cloudflare -> Apache
+# setup (trusting private ranges lets anything on those networks spoof the client
+# IP if it can reach Apache directly).
+set -u
+
+CONF=/etc/apache2/conf-available/cloudflare-ips.conf
+
+# Baked fallback: Cloudflare's published ranges as of image build.
+FALLBACK="$(cat <<'IPS'
+173.245.48.0/20
+103.21.244.0/22
+103.22.200.0/22
+103.31.4.0/22
+141.101.64.0/18
+108.162.192.0/18
+190.93.240.0/20
+188.114.96.0/20
+197.234.240.0/22
+198.41.128.0/17
+162.158.0.0/15
+104.16.0.0/13
+104.24.0.0/14
+172.64.0.0/13
+131.0.72.0/22
+2400:cb00::/32
+2606:4700::/32
+2803:f800::/32
+2405:b500::/32
+2405:8100::/32
+2a06:98c0::/29
+2c0f:f248::/32
+IPS
+)"
+
+fetch() { curl -fsS --max-time 5 "$1" 2>/dev/null; }
+live="$(printf '%s\n%s\n' "$(fetch https://www.cloudflare.com/ips-v4)" "$(fetch https://www.cloudflare.com/ips-v6)" | grep -E '^[0-9a-fA-F:.]+/[0-9]+$')"
+
+if [ -n "$live" ]; then
+  ips="$live"; src="live cloudflare.com"
+else
+  ips="$(printf '%s\n' "$FALLBACK" | grep -E '^[0-9a-fA-F:.]+/[0-9]+$')"; src="baked fallback (fetch failed)"
+fi
+
+tmp="$(mktemp)"
+{
+  echo "# Cloudflare trusted proxies for mod_remoteip -- source: ${src}."
+  echo "# (Re)generated by crbr-update-cloudflare-ips.sh; do not edit by hand."
+  echo "<IfModule mod_remoteip.c>"
+  echo "    RemoteIPHeader CF-Connecting-IP"
+  printf '%s\n' "$ips" | sed 's/^/    RemoteIPInternalProxy /'
+  if [ "${TRUST_PRIVATE_PROXIES:-0}" = "1" ]; then
+    echo "    # TRUST_PRIVATE_PROXIES=1: also trust RFC1918 reverse proxies / LBs"
+    echo "    RemoteIPInternalProxy 10.0.0.0/8"
+    echo "    RemoteIPInternalProxy 172.16.0.0/12"
+    echo "    RemoteIPInternalProxy 192.168.0.0/16"
+  fi
+  echo "</IfModule>"
+} > "$tmp" && mv "$tmp" "$CONF"
+
+echo "cloudflare-ips: ${src}, TRUST_PRIVATE_PROXIES=${TRUST_PRIVATE_PROXIES:-0}"
+CFEOF
+chmod 755 /usr/local/bin/crbr-update-cloudflare-ips.sh
+crbr-update-cloudflare-ips.sh
+a2enconf cloudflare-ips
+
+
+## "default" site
 a2dissite 000-default
 
 cat > /etc/apache2/sites-available/000-crbr-default.conf <<EOF
@@ -467,7 +524,7 @@ cat > /etc/apache2/sites-available/000-crbr-default.conf <<EOF
 EOF
 a2ensite 000-crbr-default
 
-# Creation d'un truc par defaut avec vhost_alias mais ils peuvent l'override au besoin en ecrasant le repertoire /etc/apache2/sites-enabled
+# Create a default one with vhost_alias, but they can override it as needed by overwriting the /etc/apache2/sites-enabled directory
 cat > /etc/apache2/sites-available/dev.conf <<EOF
 <VirtualHost *:80>
     ServerName dev
@@ -506,12 +563,12 @@ EOF
 a2ensite dev-docker
 
 
-## Note : pas de notion de filtrage d'IP et d'access ICI => Rien  ce sujet dans la conf et pas de /etc/apache2/access sur cette machine.
+## Note: no IP/access filtering concept HERE => nothing about it in the conf and no /etc/apache2/access on this machine.
 
 
 
-# Le truc pour docker, pour lui faire lancer apache au demarage
-# (pomp sur VM officiel, avec ajout de purge des logs au demarrage)
+# The docker bit, to make it launch apache at startup
+# (lifted from the official image, with an added log purge at startup)
 
 
 cat > /usr/local/bin/docker-php-entrypoint << 'EOF'
@@ -526,6 +583,9 @@ chown www-data: /srv/log/apache2/access.log /srv/log/apache2/error.log
 
 # Suppress annoying warning at startup
 echo "ServerName $(hostname)" > /etc/apache2/conf-enabled/servername.conf
+
+# Refresh the Cloudflare trusted-proxy list (keeps the baked list if offline)
+crbr-update-cloudflare-ips.sh || true
 
 
 # first arg is `-f` or `--some-option`
@@ -584,7 +644,7 @@ chmod 755 /usr/local/bin/apache2-foreground
 
 
 
-# Clean des conneries avant de clore l'image
+# Clean junk before sealing the image
 rm -rf /tmp/* /var/tmp/* 2> /dev/null
 find /var/log -type f -delete
 find /srv/log -type f -delete

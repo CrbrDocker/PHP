@@ -14,6 +14,10 @@ ARG BASE_DIGEST=""
 COPY --chmod=755 install-php.sh /usr/local/bin/install-php.sh
 RUN PHP_VERSION="${PHP_VERSION}" /usr/local/bin/install-php.sh && rm -f /usr/local/bin/install-php.sh
 
+# Trust RFC1918 proxies for mod_remoteip's CF-Connecting-IP (set to 1 when Apache
+# sits behind a private-IP reverse proxy / LB). Default off = direct Cloudflare only.
+ENV TRUST_PRIVATE_PROXIES=0
+
 LABEL org.opencontainers.image.title="apache-php" \
       org.opencontainers.image.description="Apache + PHP ${PHP_VERSION} on the crbr Debian base image" \
       org.opencontainers.image.version="${IMAGE_VERSION}" \
