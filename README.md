@@ -31,9 +31,13 @@ vhosts are created:
 - a **`vhost_alias`** vhost that creates vhosts on the fly from the hostname →
   `/srv/www/%0/public` (for `*.dev`, `*.test`, `*.local`, `*.docker`).
 
-A self-signed SSL certificate covering the `vhost_alias` names (signed by our dev
-CA) is installed at `/etc/apache2/ssl/dev.crt` / `dev.key`. Override `/srv/www`
-and/or `/etc/apache2/sites-enabled` as needed.
+A **self-signed** SSL cert covering those names is **generated at container start**
+into `/etc/apache2/ssl/dev.{crt,key}` (see *Adding vhosts & overriding
+configuration* below) — nothing sensitive is baked into the image.
+
+**Logs go to the container's stdout/stderr by default** (visible via `docker logs`).
+Set `-e APACHE_LOG_TO_FILE=1` to write to `/srv/log/apache2/{access,error}.log`
+instead.
 
 No environment is baked in `/etc/environment` (the old `ENVIRONMENT`/`PLATFORM`/
 `LIB_INCLUDE_PATH` dev vars and `TZ` are left commented) — set what you need at
@@ -43,6 +47,48 @@ No environment is baked in `/etc/environment` (the old `ENVIRONMENT`/`PLATFORM`/
 
 > TODO (carried from the old README): env vars to override the whole config at
 > run time.
+
+## Adding vhosts & overriding configuration
+
+Everything below is a standard Apache layout under `/etc/apache2` — override by
+mounting your own files/dirs at `docker run` time.
+
+**Add a site with the `vhost_alias` convention (no config needed).** Drop your
+app at `/srv/www/<name>/public` and reach it at `<name>.dev` / `.test` / `.local`
+/ `.docker`:
+
+```
+docker run -v ./mysite:/srv/www/mysite crbrdocker/apache-php:8.3
+# -> http://mysite.dev/  (DocumentRoot /srv/www/mysite/public)
+```
+
+**Add an explicit vhost.** Mount a `.conf` into `sites-enabled/` (or replace the
+whole dir):
+
+```
+docker run -v ./my-vhost.conf:/etc/apache2/sites-enabled/my-vhost.conf ...
+docker run -v ./sites:/etc/apache2/sites-enabled ...
+```
+
+**Override the base config.** The tuning/security/logging live in
+`conf-enabled/crbr.conf`:
+
+```
+docker run -v ./crbr.conf:/etc/apache2/conf-enabled/crbr.conf ...
+```
+
+**Provide your own TLS cert** — mount over the generated one (the boot-time
+generator then leaves it alone):
+
+```
+docker run -v ./cert.pem:/etc/apache2/ssl/dev.crt -v ./key.pem:/etc/apache2/ssl/dev.key ...
+```
+
+**Persist the generated cert** across container recreation (otherwise a fresh one
+is made each start): `-v php-ssl:/etc/apache2/ssl`.
+
+**Override the web root**: mount at `/srv/www`. **Logging**: `APACHE_LOG_TO_FILE`
+(above). **Cloudflare / real IP**: see the next section (`TRUST_PRIVATE_PROXIES`).
 
 ## Cloudflare real client IP
 

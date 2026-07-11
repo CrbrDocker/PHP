@@ -29,7 +29,7 @@ apt -y update
 apt-get -y dist-upgrade
 
 # Installation apache & modules
-apt-get -y --no-install-recommends install apache2 libapache2-mod-php${PHP_VERSION} php${PHP_VERSION}-apcu php${PHP_VERSION}-bcmath php${PHP_VERSION}-bz2 php${PHP_VERSION}-cli php${PHP_VERSION}-common php${PHP_VERSION}-curl php${PHP_VERSION}-dba php${PHP_VERSION}-gd php${PHP_VERSION}-grpc php${PHP_VERSION}-igbinary php${PHP_VERSION}-imagick php${PHP_VERSION}-ldap php${PHP_VERSION}-mbstring php${PHP_VERSION}-memcached php${PHP_VERSION}-memcache php${PHP_VERSION}-msgpack php${PHP_VERSION}-mysql php${PHP_VERSION}-odbc php${PHP_VERSION}-opcache php${PHP_VERSION}-readline php${PHP_VERSION}-redis php${PHP_VERSION}-soap php${PHP_VERSION}-sqlite3 php${PHP_VERSION}-sybase php${PHP_VERSION}-tidy php${PHP_VERSION}-xml php${PHP_VERSION}-xmlrpc php${PHP_VERSION}-zip php-common
+apt-get -y --no-install-recommends install apache2 openssl libapache2-mod-php${PHP_VERSION} php${PHP_VERSION}-apcu php${PHP_VERSION}-bcmath php${PHP_VERSION}-bz2 php${PHP_VERSION}-cli php${PHP_VERSION}-common php${PHP_VERSION}-curl php${PHP_VERSION}-dba php${PHP_VERSION}-gd php${PHP_VERSION}-grpc php${PHP_VERSION}-igbinary php${PHP_VERSION}-imagick php${PHP_VERSION}-ldap php${PHP_VERSION}-mbstring php${PHP_VERSION}-memcached php${PHP_VERSION}-memcache php${PHP_VERSION}-msgpack php${PHP_VERSION}-mysql php${PHP_VERSION}-odbc php${PHP_VERSION}-opcache php${PHP_VERSION}-readline php${PHP_VERSION}-redis php${PHP_VERSION}-soap php${PHP_VERSION}-sqlite3 php${PHP_VERSION}-sybase php${PHP_VERSION}-tidy php${PHP_VERSION}-xml php${PHP_VERSION}-xmlrpc php${PHP_VERSION}-zip php-common
 
 # While we're at it, composer too ... (it needs php8.3-intl, otherwise it pulls php8.4-intl & php8.4-common...)
 apt-get -y --no-install-recommends install php${PHP_VERSION}-intl composer
@@ -93,6 +93,11 @@ cat >> /etc/apache2/envvars <<EOF
 
 ### DOn't care here.
 
+### Log targets: stdout/stderr by default; the entrypoint repoints these at
+### /srv/log/apache2 when APACHE_LOG_TO_FILE=1.
+export APACHE_ACCESS_LOG="\${APACHE_ACCESS_LOG:-/proc/self/fd/1}"
+export APACHE_ERROR_LOG="\${APACHE_ERROR_LOG:-/proc/self/fd/2}"
+
 EOF
 
 # PHP config:
@@ -114,65 +119,44 @@ done
 # apache config
 
 ## SSL config
+## The self-signed dev cert is NOT baked into the image (no private key in the
+## repo). crbr-generate-cert.sh creates one at container start into
+## /etc/apache2/ssl unless a cert is already there -- mount your own to override.
 mkdir /etc/apache2/ssl
 
-cat > /etc/apache2/ssl/dev.crt <<EOF
------BEGIN CERTIFICATE-----
-MIID/zCCAuegAwIBAgIUHY8CkPf1yxXcOV+mfRMUbIrKemMwDQYJKoZIhvcNAQEM
-BQAwWTEMMAoGA1UEAwwDZGV2MQswCQYDVQQGEwJGUjEXMBUGA1UECAwOw45sZS1k
-ZS1GcmFuY2UxDjAMBgNVBAcMBVBhcmlzMRMwEQYDVQQKDApEZXYgRG9ja2VyMCAX
-DTI1MDQxNjE3MzIxMFoYDzIwNTUwNDA5MTczMjEwWjBZMQwwCgYDVQQDDANkZXYx
-CzAJBgNVBAYTAkZSMRcwFQYDVQQIDA7DjmxlLWRlLUZyYW5jZTEOMAwGA1UEBwwF
-UGFyaXMxEzARBgNVBAoMCkRldiBEb2NrZXIwggEiMA0GCSqGSIb3DQEBAQUAA4IB
-DwAwggEKAoIBAQC3Oml6oan8fNi0M1xZN+4dIrThMKpPpUaTJpZbF3gA2o+8iyPp
-GpuoiCcHq7SNPhRge6JgCls6cCbkhqZhkNYT7s40sHziK4P9OZLkac2ptQjPodY4
-lz7BEQtwK2QgkQ1WZm9o/apDS453du6Ig3SuAp8jIBFV4c3SHquUz41Tin1roGWF
-VcMczg35Q3iUkf+4N76wJfEFZJ6ufPhUtsZlfIW1sICLDTc1FOJJxpaFEMDMCeQW
-AtUAJ8DL2d285YiMwHg+8Y2/WZylqsuTDrjrPuSiJmuXvRKVM5cz95zJK/krHooS
-m2MhU2Z9G9eOzz6rjBPvSo22/WSyNYjHfG1rAgMBAAGjgbwwgbkwHQYDVR0OBBYE
-FHrU8Z6WzGelHFgdfbIya6zRm0jbMB8GA1UdIwQYMBaAFHrU8Z6WzGelHFgdfbIy
-a6zRm0jbMA4GA1UdDwEB/wQEAwIFoDAgBgNVHSUBAf8EFjAUBggrBgEFBQcDAQYI
-KwYBBQUHAwIwRQYDVR0RBD4wPIIDZGV2ggR0ZXN0ggUqLmRldoIGKi50ZXN0ggVs
-b2NhbIIHKi5sb2NhbIIGZG9ja2VygggqLmRvY2tlcjANBgkqhkiG9w0BAQwFAAOC
-AQEAKIHjKpJtrHh2E5onhW/t6DyzpFaz91A/oCeruUyDWyLPNlgClxa9hS/LudkO
-rusIVI35LtK7Vc2mMoA0mzBTR76IefndxQVHMVVIKMn8wLiSZ6I+wL4f6ylSSVqa
-IhH8ddSAE1t+KdchW5MOQr1TOlf51DUGX8fuuEvmSV5+5hB8QPvzsts0Yd+08HQM
-lbAYRmQVEf1fA5KL77FNHc1d5d/XIuXdqb/1tikYdeuSmtMPFIezOQ8EHFYONcLe
-S3RP6/tpyWjTOjsO5HG/W/ndBXsbYE5tkoB+u21CePHjHii0hVd6Lm+y6AD/OIbE
-y297Njj7yoEepUUr3cGhIA5oKw==
------END CERTIFICATE-----
-EOF
+cat > /usr/local/bin/crbr-generate-cert.sh <<'CERTEOF'
+#!/bin/bash
+#
+# crbr-generate-cert.sh
+#
+# Generate a self-signed dev certificate for the default vhosts, unless one is
+# already present at /etc/apache2/ssl/dev.crt (mounted by the user, or made on a
+# previous start). Idempotent: it never overwrites an existing cert/key.
+#
+# The SANs match the vhost_alias ServerAlias set so the cert covers every dev
+# hostname the image serves.
+set -u
 
-cat > /etc/apache2/ssl/dev.key <<EOF
------BEGIN PRIVATE KEY-----
-MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC3Oml6oan8fNi0
-M1xZN+4dIrThMKpPpUaTJpZbF3gA2o+8iyPpGpuoiCcHq7SNPhRge6JgCls6cCbk
-hqZhkNYT7s40sHziK4P9OZLkac2ptQjPodY4lz7BEQtwK2QgkQ1WZm9o/apDS453
-du6Ig3SuAp8jIBFV4c3SHquUz41Tin1roGWFVcMczg35Q3iUkf+4N76wJfEFZJ6u
-fPhUtsZlfIW1sICLDTc1FOJJxpaFEMDMCeQWAtUAJ8DL2d285YiMwHg+8Y2/WZyl
-qsuTDrjrPuSiJmuXvRKVM5cz95zJK/krHooSm2MhU2Z9G9eOzz6rjBPvSo22/WSy
-NYjHfG1rAgMBAAECggEADeqET1mO8QvEY69Q8L/EOHdF2KKbFNB/MzbnjYSTSzFO
-YGoK8K3iK6Mnn7gFTwLrhkZtlzDCLAaPlaS6Z0eaUso85BiRa5YVgLqKMwnsIlsL
-D8YBYKvwCrbSMRNCmAycQDcoeAdoEpNe/yjLxheB2aN+VaseVfD/8lj8/CDlYXZO
-18uGfPu2HAdLJOEZO1WugZ6q8TJOflr+TXw1qYCZr3VCgl2q7Rdvn5p1p0ehtSPh
-tDykBGs3BXbdpQueZS0JgSyky2Zbh69q0X7aJHchQQJt3GKz5wPjl5h5TjW8E6cY
-DXVJN00c6svxqeOzCD/G9nwKmKi+0LLgjDsDjoIOCQKBgQDcolEzGLKeqJ4ch7qi
-ivJ7bPs4GGCpw+Vf1TwL/5zjR1iCpFzK4ZxVDe21IIJ7AtqBJaWbn989D0/Y+T8p
-PBg4trvHJmAuHBdKzVTS1M0fgMoZNkLbBiT0nODoeaSWYfF61xUWTtqG2tcEdLI1
-BKrXKkAUrmc6EodLCI3C22Fi4wKBgQDUmSaNM06B10z3odDv788ZWjhA9i+aYu2b
-92RM6ObOXLW4DGf7+yWaOVsBj4xrs7XH6VZ17H8ebL9d/bC4hn0YYc0lvYAsYlRf
-OMLRt1MgSaIwhPv0QeLd/XZ1S5CMSPpfpZBmO9Qv/BJb68xPZ0F6V1qzyxETiTfu
-w2taJYXp2QKBgFQv/4nev7F4p7Q9OkLxf+sGv6k87A17OVfi9qGhbIzw2V4oN1wW
-0F9IDE8T05X6lcO3yMRkMXuMDyy8lpQ2YQuq9mXcR9DwWRbq2JYGKyr9KqCKKuKG
-Kq3H+q3aVKopP0pfLaWwewQAFxGVMba3TDUD4yXBEpR/I27HGcijizp/AoGAcOVL
-NZxTSlv8wVuqyl98iKgCS2zwZnm2WCaNmtHrDxboYO4loggCNd3TWAbUuLTcCWb9
-xO1rq8pv7Qe0+qhgcbwt5qa1E9y7lT1dJ2TEvdacTEuySElcoing5/TSs8xlOLmA
-7ulCiqC/VxTmkBvzB3av8d4aGVe63g3kSiC29jECgYAxemChTUCk9GaQAoon3AFI
-fKXhQCYlaH0BAMJz40vmz/dfoWWJjUARLgmvdyj+j1hLRj+6oK23NfAH6fIdNVZv
-91JvfY9VDEokIrIU95X/E0REZIZHPWBLV5a6h9+ljPYzf9uiLf0M9TJzLYHLKsGw
-Qpri7x5m91EnksWTgh3biQ==
------END PRIVATE KEY-----
-EOF
+CRT=/etc/apache2/ssl/dev.crt
+KEY=/etc/apache2/ssl/dev.key
+
+if [ -s "$CRT" ] && [ -s "$KEY" ]; then
+  echo "dev-cert: keeping existing ${CRT}"
+  exit 0
+fi
+
+mkdir -p /etc/apache2/ssl
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout "$KEY" -out "$CRT" -days 3650 \
+  -subj "/CN=dev" \
+  -addext "subjectAltName=DNS:localhost,DNS:dev,DNS:*.dev,DNS:test,DNS:*.test,DNS:local,DNS:*.local,DNS:docker,DNS:*.docker" \
+  >/dev/null 2>&1
+
+chmod 600 "$KEY"
+chmod 644 "$CRT"
+echo "dev-cert: generated self-signed certificate at ${CRT}"
+CERTEOF
+chmod 755 /usr/local/bin/crbr-generate-cert.sh
 
 ## The base config (note: concurrency & co greatly reduced vs the standard)
 cat > /etc/apache2/conf-available/crbr.conf<<EOF
@@ -220,7 +204,9 @@ KeepAliveTimeout        1
 
 ### Log directives
 LogLevel warn
-#already in apache2.conf#ErrorLog /srv/log/apache2/error.log
+# Error log target: stdout/stderr by default, or /srv/log/apache2 when APACHE_LOG_TO_FILE=1
+# (both resolved by the entrypoint / envvars into ${APACHE_ERROR_LOG}).
+ErrorLog "\${APACHE_ERROR_LOG}"
 
 <IfModule !mod_remoteip.c>
     # If we haven't configured mod_remote_ip & cloudflare
@@ -255,13 +241,13 @@ LogLevel warn
 SetEnvIf SOAPAction "^$" notsoapaction
 
 # Normal log if it not SOAP and we dont ask to remove the query string parameters
-CustomLog /srv/log/apache2/access.log vcombined expr=(reqenv('notsoapaction')=='yes'&&reqenv('removequerystring')!='yes')
+CustomLog "\${APACHE_ACCESS_LOG}" vcombined expr=(reqenv('notsoapaction')=='yes'&&reqenv('removequerystring')!='yes')
 
 # If we are not a SOAP action and we asked to remove the query string parameters with a SetEnvIf SOMETHING removequerystring=yes
-CustomLog /srv/log/apache2/access.log vcombinednoquerystring expr=(reqenv('notsoapaction')=='yes'&&reqenv('removequerystring')=='yes')
+CustomLog "\${APACHE_ACCESS_LOG}" vcombinednoquerystring expr=(reqenv('notsoapaction')=='yes'&&reqenv('removequerystring')=='yes')
 
 # If we are a soap action
-CustomLog /srv/log/apache2/access.log vcombinedsoap expr=(reqenv('notsoapaction')!='yes')
+CustomLog "\${APACHE_ACCESS_LOG}" vcombinedsoap expr=(reqenv('notsoapaction')!='yes')
 
 
 ### Security
@@ -576,13 +562,22 @@ cat > /usr/local/bin/docker-php-entrypoint << 'EOF'
 set -e
 
 
-# Log files cleanup
-rm -rf /srv/log/apache2/* 2>/dev/null || true
-touch /srv/log/apache2/access.log /srv/log/apache2/error.log
-chown www-data: /srv/log/apache2/access.log /srv/log/apache2/error.log
+# Logs go to the container's stdout/stderr by default (see envvars). Set
+# APACHE_LOG_TO_FILE=1 to write to files under /srv/log/apache2 instead.
+if [ "${APACHE_LOG_TO_FILE:-0}" = "1" ]; then
+	export APACHE_ACCESS_LOG=/srv/log/apache2/access.log
+	export APACHE_ERROR_LOG=/srv/log/apache2/error.log
+	mkdir -p /srv/log/apache2
+	rm -f /srv/log/apache2/*.log 2>/dev/null || true
+	touch "$APACHE_ACCESS_LOG" "$APACHE_ERROR_LOG"
+	chown www-data: "$APACHE_ACCESS_LOG" "$APACHE_ERROR_LOG"
+fi
 
 # Suppress annoying warning at startup
 echo "ServerName $(hostname)" > /etc/apache2/conf-enabled/servername.conf
+
+# Generate the self-signed dev cert if none is present (mount your own to override)
+crbr-generate-cert.sh || true
 
 # Refresh the Cloudflare trusted-proxy list (keeps the baked list if offline)
 crbr-update-cloudflare-ips.sh || true
