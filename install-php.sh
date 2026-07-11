@@ -159,7 +159,7 @@ CERTEOF
 chmod 755 /usr/local/bin/crbr-generate-cert.sh
 
 ## The base config (note: concurrency & co greatly reduced vs the standard)
-cat > /etc/apache2/conf-available/crbr.conf<<EOF
+cat > /etc/apache2/conf-available/crbr.conf<<'EOF'
 
 ### Base config, number of threads & co
 
@@ -206,7 +206,7 @@ KeepAliveTimeout        1
 LogLevel warn
 # Error log target: stdout/stderr by default, or /srv/log/apache2 when APACHE_LOG_TO_FILE=1
 # (both resolved by the entrypoint / envvars into ${APACHE_ERROR_LOG}).
-ErrorLog "\${APACHE_ERROR_LOG}"
+ErrorLog "${APACHE_ERROR_LOG}"
 
 <IfModule !mod_remoteip.c>
     # If we haven't configured mod_remote_ip & cloudflare
@@ -241,13 +241,13 @@ ErrorLog "\${APACHE_ERROR_LOG}"
 SetEnvIf SOAPAction "^$" notsoapaction
 
 # Normal log if it not SOAP and we dont ask to remove the query string parameters
-CustomLog "\${APACHE_ACCESS_LOG}" vcombined expr=(reqenv('notsoapaction')=='yes'&&reqenv('removequerystring')!='yes')
+CustomLog "${APACHE_ACCESS_LOG}" vcombined expr=(reqenv('notsoapaction')=='yes'&&reqenv('removequerystring')!='yes')
 
 # If we are not a SOAP action and we asked to remove the query string parameters with a SetEnvIf SOMETHING removequerystring=yes
-CustomLog "\${APACHE_ACCESS_LOG}" vcombinednoquerystring expr=(reqenv('notsoapaction')=='yes'&&reqenv('removequerystring')=='yes')
+CustomLog "${APACHE_ACCESS_LOG}" vcombinednoquerystring expr=(reqenv('notsoapaction')=='yes'&&reqenv('removequerystring')=='yes')
 
 # If we are a soap action
-CustomLog "\${APACHE_ACCESS_LOG}" vcombinedsoap expr=(reqenv('notsoapaction')!='yes')
+CustomLog "${APACHE_ACCESS_LOG}" vcombinedsoap expr=(reqenv('notsoapaction')!='yes')
 
 
 ### Security
