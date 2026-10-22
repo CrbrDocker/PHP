@@ -3,7 +3,9 @@
 # one build per version resolved live from the sury repo.
 # BASE_DIGEST records the exact base index the image was built from so the
 # rebuild gate can detect a refreshed base.
-FROM crbrdocker/debian:stable
+ARG BASE_IMAGE=ghcr.io/crbrdocker/debian:stable
+FROM ${BASE_IMAGE}
+ARG BASE_IMAGE
 ARG PHP_VERSION=8.3
 ARG IMAGE_VERSION=""
 ARG IMAGE_REVISION=""
@@ -27,7 +29,7 @@ LABEL org.opencontainers.image.title="apache-php" \
       org.opencontainers.image.revision="${IMAGE_REVISION}" \
       org.opencontainers.image.created="${IMAGE_CREATED}" \
       org.opencontainers.image.source="${IMAGE_SOURCE}" \
-      org.opencontainers.image.base.name="crbrdocker/debian:stable" \
+      org.opencontainers.image.base.name="${BASE_IMAGE}" \
       org.opencontainers.image.base.digest="${BASE_DIGEST}"
 
 ENTRYPOINT ["docker-php-entrypoint"]

@@ -170,6 +170,10 @@ was built on has changed, or a simulated `dist-upgrade` shows pending updates.
 - Docker Hub is conditional on secrets `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN`;
   namespace is repo/org var `DOCKERHUB_NAMESPACE` (falls back to the username).
   Absent creds → GHCR-only.
+- The base image is pulled from **GHCR** (`ghcr.io/crbrdocker/debian:stable`, same digest as
+  Docker Hub's): Docker Hub pulls are rate-limited (200 per 6 h for an authenticated free
+  account), and Docker Hub is only a publish target. The `describe` job likewise reads image
+  data from GHCR and only the tag list from Docker Hub's web API.
 - The Docker Hub overview is **generated** (edits made on Hub are overwritten); it
   needs `DOCKERHUB_TOKEN` with Read/Write/Delete scope, and the user must be Admin
   on the repo when the namespace is an organization.

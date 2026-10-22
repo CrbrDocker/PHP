@@ -18,7 +18,7 @@
 #   VCS_REF    (arg2)  current commit sha to compare against the image
 #                      [default: $GITHUB_SHA, else git HEAD, else "unknown"]
 #   BASE_IMAGE (arg3)  base image ref to compare digests against
-#                      [default: crbrdocker/debian:stable]
+#                      [default: ghcr.io/crbrdocker/debian:stable]
 #
 # Output:
 #   - prints "REBUILD=true|false" and the reason(s)
@@ -29,7 +29,7 @@ set -uo pipefail
 
 IMAGE="${IMAGE:-${1:-}}"
 VCS_REF="${VCS_REF:-${2:-${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}}}"
-BASE_IMAGE="${BASE_IMAGE:-${3:-crbrdocker/debian:stable}}"
+BASE_IMAGE="${BASE_IMAGE:-${3:-ghcr.io/crbrdocker/debian:stable}}"
 if [ -z "$IMAGE" ]; then
   echo "ERROR: IMAGE is required.  Usage: $0 <image-ref> [vcs-ref] [base-image]" >&2
   exit 2

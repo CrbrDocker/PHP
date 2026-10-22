@@ -30,7 +30,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BASE_IMAGE: crbrdocker/debian:stable
+  BASE_IMAGE: ghcr.io/crbrdocker/debian:stable   # base pulled from GHCR: Docker Hub pulls are rate-limited
 
 jobs:
   # --------------------------------------------------------------------------
@@ -175,7 +175,8 @@ jobs:
             --build-arg "IMAGE_REVISION=${VCS_REF}" \
             --build-arg "IMAGE_CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --build-arg "IMAGE_SOURCE=${SOURCE_URL}" \
-            --build-arg "BASE_DIGEST=${base_digest}"
+            --build-arg "BASE_DIGEST=${base_digest}" \
+            --build-arg "BASE_IMAGE=${BASE_IMAGE}"
 
   # --------------------------------------------------------------------------
   # Merge the per-arch tags into the version tag, per registry. The arches may
@@ -269,6 +270,8 @@ jobs:
   # read from its SBOM attestation (per arch when amd64 and arm64 differ). Runs
   # on every run, so the page always matches what is live — even when nothing
   # was rebuilt.
+  # Image data is read from GHCR (same images; Docker Hub pulls are rate-
+  # limited), the tag list from Docker Hub's web API (not counted as pulls).
   # --------------------------------------------------------------------------
   describe:
     needs: [resolve, manifest]
@@ -276,16 +279,15 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      GHCR_IMAGE: ghcr.io/${{ needs.resolve.outputs.owner }}/apache-php
       DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/apache-php
       SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
     steps:
-      - name: Log in to Docker Hub
-        if: env.DOCKERHUB_USERNAME != ''
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
-          username: ${{ env.DOCKERHUB_USERNAME }}
-          password: ${{ env.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Generate overview
         if: env.DOCKERHUB_USERNAME != ''
         run: |
@@ -332,8 +334,8 @@ jobs:
           versions=$(curl -sfL "https://hub.docker.com/v2/repositories/${DOCKERHUB_IMAGE}/tags?page_size=100" \
             | jq -r '.results[].name | select(test("^[0-9]+\\.[0-9]+$"))' | sort -rV)
           for v in $versions; do
-            sbom=$(inspect "${DOCKERHUB_IMAGE}:${v}" '{{ json .SBOM }}')
-            built=$(inspect "${DOCKERHUB_IMAGE}:${v}" '{{ json .Image }}' \
+            sbom=$(inspect "${GHCR_IMAGE}:${v}" '{{ json .SBOM }}')
+            built=$(inspect "${GHCR_IMAGE}:${v}" '{{ json .Image }}' \
               | jq -r '[.[] | .config.Labels["org.opencontainers.image.created"] // empty] | max // "?" | .[0:10]')
             # One summary row: upstream PHP/Apache versions (epoch and Debian
             # revision stripped), source (sury builds carry a "+0~" revision),
