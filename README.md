@@ -144,9 +144,10 @@ Everything is driven by `.github/workflows/build.yml`:
 4. **manifest** — compare the per-arch SBOMs (warn on any difference, ignoring
    Debian `+bN` binNMU suffixes), then merge the per-arch tags into `:<ver>`.
 5. **cleanup** — prune untagged GHCR versions.
-6. **describe** — regenerate the Docker Hub overview: a short intro linking here,
-   plus the exact PHP/Apache package versions of every published tag, read from its
-   SBOM attestation (per arch when they differ). Runs on every run.
+6. **describe** — regenerate the Docker Hub overview: a short intro linking here, a
+   summary row per tag (PHP/Apache version, Debian or sury source, build date, arch
+   status), then the exact PHP/Apache package versions of every tag live on Docker
+   Hub, read from its SBOM attestation (per arch when they differ). Runs on every run.
 
 Triggers: any push to `main`, weekly `cron 50 8 * * 2`, or manual *Run workflow*
 (optional `min_php`; `force` toggle, default on, builds all resolved versions

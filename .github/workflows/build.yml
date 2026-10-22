@@ -276,13 +276,18 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/apache-php
       SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
     steps:
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
       - name: Generate overview
         if: env.DOCKERHUB_USERNAME != ''
-        env:
-          VERSIONS: ${{ needs.resolve.outputs.matrix }}
         run: |
           set -euo pipefail
           out="${RUNNER_TEMP}/hub-overview.md"
@@ -294,18 +299,49 @@ jobs:
             echo
             echo "**Documentation** (usage, vhosts, TLS, Cloudflare real IP, how it is built): ${SOURCE_URL}#readme"
             echo
+            echo "## Summary"
+            echo
+            echo "| Tag | PHP | Source | Apache | Built | Arches |"
+            echo "| --- | --- | --- | --- | --- | --- |"
+          } > "$out"
+          tables="${RUNNER_TEMP}/hub-tables.md"
+          {
+            echo
             echo "## Installed packages"
             echo
             echo "Generated $(date -u +%Y-%m-%d) from each tag's SBOM attestation — PHP and Apache packages"
             echo "only. Versions that differ between \`amd64\` and \`arm64\` are shown per arch. Full list:"
             echo
             echo "    docker buildx imagetools inspect ${DOCKERHUB_IMAGE}:<tag> --format '{{ json .SBOM }}'"
-          } > "$out"
-          for v in $(echo "$VERSIONS" | jq -r '.[]' | sort -rV); do
+          } > "$tables"
+          # Every <maj>.<min> tag live on Docker Hub (not just this run's matrix,
+          # which a manual min_php run narrows).
+          versions=$(curl -sfL "https://hub.docker.com/v2/repositories/${DOCKERHUB_IMAGE}/tags?page_size=100" \
+            | jq -r '.results[].name | select(test("^[0-9]+\\.[0-9]+$"))' | sort -rV)
+          for v in $versions; do
             if ! sbom=$(docker buildx imagetools inspect "${DOCKERHUB_IMAGE}:${v}" --format '{{ json .SBOM }}' 2>/dev/null); then
               echo "no published ${DOCKERHUB_IMAGE}:${v}, skipped"
               continue
             fi
+            built=$(docker buildx imagetools inspect "${DOCKERHUB_IMAGE}:${v}" --format '{{ json .Image }}' \
+              | jq -r '[.[] | .config.Labels["org.opencontainers.image.created"] // empty] | max // "?" | .[0:10]')
+            # One summary row: upstream PHP/Apache versions (epoch and Debian
+            # revision stripped), source (sury builds carry a "+0~" revision),
+            # and how many PHP/Apache packages differ between the arches.
+            echo "$sbom" | jq -r --arg v "$v" --arg built "$built" '
+              def pk(p): [ .[p].SPDX.packages[]?
+                           | select(.name | test("^(php|apache2|libapache2)"))
+                           | {(.name): (.versionInfo // "")} ] | add // {};
+              def same(a; b): ((a // "") | sub("\\+b[0-9]+$"; "")) == ((b // "") | sub("\\+b[0-9]+$"; ""));
+              def up(x): (x // "?") | sub("^[0-9]+:"; "") | sub("-[^-]*$"; "");
+              pk("linux/amd64") as $a | pk("linux/arm64") as $b
+              | "php\($v)-cli" as $cli
+              | ([ $a + $b | keys[] | select(same($a[.]; $b[.]) | not) ] | length) as $n
+              | (if same($a[$cli]; $b[$cli]) then up($a[$cli])
+                 else "\(up($a[$cli])) (amd64) · \(up($b[$cli])) (arm64)" end) as $php
+              | (if (($a[$cli] // $b[$cli] // "") | test("\\+0~")) then "sury" else "Debian" end) as $src
+              | "| `:\($v)` | \($php) | \($src) | \(up($a["apache2"] // $b["apache2"])) | \($built) | "
+                + (if $n == 0 then "✅ identical" else "⚠ \($n) packages differ" end) + " |"' >> "$out"
             {
               echo
               echo "### \`:${v}\`"
@@ -322,8 +358,9 @@ jobs:
                 | ($a + $b | keys[]) as $n
                 | if same($a[$n]; $b[$n]) then "| \($n) | `\($a[$n] // $b[$n])` |"
                   else "| \($n) | amd64 `\($a[$n] // "—")` · arm64 `\($b[$n] // "—")` ⚠ |" end'
-            } >> "$out"
+            } >> "$tables"
           done
+          cat "$tables" >> "$out"
           echo "overview: $(wc -c < "$out") bytes (Docker Hub limit 25000)"
           cat "$out"
       - name: Push overview to Docker Hub
