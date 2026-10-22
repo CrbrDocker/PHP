@@ -278,6 +278,78 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   # --------------------------------------------------------------------------
+  # Regenerate the Docker Hub overview: a short intro linking to the GitHub
+  # README, plus the exact PHP/Apache package versions of every published tag,
+  # read from its SBOM attestation (per arch when amd64 and arm64 differ). Runs
+  # on every run, so the page always matches what is live — even when nothing
+  # was rebuilt or a tag was held for arch skew.
+  # --------------------------------------------------------------------------
+  describe:
+    needs: [resolve, manifest]
+    if: always() && needs.resolve.result == 'success'
+    runs-on: ubuntu-24.04
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/apache-php
+      SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+    steps:
+      - name: Generate overview
+        if: env.DOCKERHUB_USERNAME != ''
+        env:
+          VERSIONS: ${{ needs.resolve.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/hub-overview.md"
+          {
+            echo "# apache-php"
+            echo
+            echo "Apache + PHP on the crbr Debian base image (\`crbrdocker/debian:stable\`), multi-arch"
+            echo "(\`amd64\` + \`arm64\`), one tag per PHP version, rebuilt weekly when something changed."
+            echo
+            echo "**Documentation** (usage, vhosts, TLS, Cloudflare real IP, how it is built): ${SOURCE_URL}#readme"
+            echo
+            echo "## Installed packages"
+            echo
+            echo "Generated $(date -u +%Y-%m-%d) from each tag's SBOM attestation — PHP and Apache packages"
+            echo "only. Versions that differ between \`amd64\` and \`arm64\` are shown per arch. Full list:"
+            echo
+            echo "    docker buildx imagetools inspect ${DOCKERHUB_IMAGE}:<tag> --format '{{ json .SBOM }}'"
+          } > "$out"
+          for v in $(echo "$VERSIONS" | jq -r '.[]' | sort -rV); do
+            if ! sbom=$(docker buildx imagetools inspect "${DOCKERHUB_IMAGE}:${v}" --format '{{ json .SBOM }}' 2>/dev/null); then
+              echo "no published ${DOCKERHUB_IMAGE}:${v}, skipped"
+              continue
+            fi
+            {
+              echo
+              echo "### \`:${v}\`"
+              echo
+              echo "| Package | Version |"
+              echo "| --- | --- |"
+              # Debian binNMU suffixes (+bN) are ignored when comparing arches.
+              echo "$sbom" | jq -r '
+                def pk(p): [ .[p].SPDX.packages[]?
+                             | select(.name | test("^(php|apache2|libapache2)"))
+                             | {(.name): (.versionInfo // "")} ] | add // {};
+                def same(a; b): ((a // "") | sub("\\+b[0-9]+$"; "")) == ((b // "") | sub("\\+b[0-9]+$"; ""));
+                pk("linux/amd64") as $a | pk("linux/arm64") as $b
+                | ($a + $b | keys[]) as $n
+                | if same($a[$n]; $b[$n]) then "| \($n) | `\($a[$n] // $b[$n])` |"
+                  else "| \($n) | amd64 `\($a[$n] // "—")` · arm64 `\($b[$n] // "—")` ⚠ |" end'
+            } >> "$out"
+          done
+          echo "overview: $(wc -c < "$out") bytes (Docker Hub limit 25000)"
+          cat "$out"
+      - name: Push overview to Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ env.DOCKERHUB_IMAGE }}
+          readme-filepath: ${{ runner.temp }}/hub-overview.md
+
+  # --------------------------------------------------------------------------
   # Keep the schedule alive. GitHub disables cron workflows in public repos
   # after 60 days without repo activity; re-enabling via the API resets that.
   # --------------------------------------------------------------------------

@@ -145,6 +145,9 @@ Everything is driven by `.github/workflows/build.yml`:
    suffixes); if they match, merge the per-arch tags into `:<ver>`, otherwise keep
    the published `:<ver>` and warn.
 5. **cleanup** — prune untagged GHCR versions.
+6. **describe** — regenerate the Docker Hub overview: a short intro linking here,
+   plus the exact PHP/Apache package versions of every published tag, read from its
+   SBOM attestation (per arch when they differ). Runs on every run.
 
 Triggers: any push to `main`, weekly `cron 50 8 * * 2`, or manual *Run workflow*
 (optional `min_php`; `force` toggle, default on, builds all resolved versions
@@ -168,3 +171,6 @@ was built on has changed, or a simulated `dist-upgrade` shows pending updates.
 - Docker Hub is conditional on secrets `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN`;
   namespace is repo/org var `DOCKERHUB_NAMESPACE` (falls back to the username).
   Absent creds → GHCR-only.
+- The Docker Hub overview is **generated** (edits made on Hub are overwritten); it
+  needs `DOCKERHUB_TOKEN` with Read/Write/Delete scope, and the user must be Admin
+  on the repo when the namespace is an organization.
