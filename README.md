@@ -23,10 +23,10 @@ the `MIN_PHP` repo variable or the `workflow_dispatch` `min_php` input.
 
 PHP packages come from **Debian** when Debian itself ships that PHP version (e.g.
 `php8.4` on trixie, security-supported, same version on every arch), otherwise from
-**sury**; extensions Debian lacks (e.g. `grpc`) still come from sury. Both arches
-must ship identical package versions: sury's arm64 index can lag amd64, so when the
-two differ the `:<ver>` tag keeps its last consistent image (with a workflow
-warning) until both arches catch up.
+**sury**; extensions Debian lacks (e.g. `grpc`) still come from sury. sury's arm64
+index can lag amd64, so the two arches may briefly ship different PHP builds: the
+image is still published, the workflow logs a warning, and the Docker Hub overview
+marks the differing packages with ⚠.
 
 ## Usage
 
@@ -141,9 +141,8 @@ Everything is driven by `.github/workflows/build.yml`:
 3. **build** — matrix `version × {amd64→ubuntu-24.04, arm64→ubuntu-24.04-arm}`,
    **native, no QEMU**; `docker buildx build` (with `PHP_VERSION` build-arg) pushes
    an OCI `:<ver>-<arch>` image (provenance + SBOM) to both registries.
-4. **manifest** — compare the per-arch SBOMs (ignoring Debian `+bN` binNMU
-   suffixes); if they match, merge the per-arch tags into `:<ver>`, otherwise keep
-   the published `:<ver>` and warn.
+4. **manifest** — compare the per-arch SBOMs (warn on any difference, ignoring
+   Debian `+bN` binNMU suffixes), then merge the per-arch tags into `:<ver>`.
 5. **cleanup** — prune untagged GHCR versions.
 6. **describe** — regenerate the Docker Hub overview: a short intro linking here,
    plus the exact PHP/Apache package versions of every published tag, read from its
@@ -151,8 +150,7 @@ Everything is driven by `.github/workflows/build.yml`:
 
 Triggers: any push to `main`, weekly `cron 50 8 * * 2`, or manual *Run workflow*
 (optional `min_php`; `force` toggle, default on, builds all resolved versions
-even when the gate sees no change; `allow_skew` toggle, default off, publishes
-even when amd64 and arm64 package versions differ).
+even when the gate sees no change).
 
 `install-php.sh` is copied into the image and run once at build time; it takes the
 target version from `$PHP_VERSION` and derives the sury repo codename from the base

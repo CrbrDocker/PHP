@@ -20,10 +20,6 @@ on:
         description: "Force rebuild even if the gate says nothing changed"
         type: boolean
         default: true
-      allow_skew:
-        description: "Publish even if amd64 and arm64 ship different package versions"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -182,9 +178,9 @@ jobs:
             --build-arg "BASE_DIGEST=${base_digest}"
 
   # --------------------------------------------------------------------------
-  # Merge the per-arch tags into the version tag, per registry — unless the two
-  # arches ship different package versions (sury's arm64 index can lag amd64),
-  # in which case :<ver> keeps its last consistent image until the next run.
+  # Merge the per-arch tags into the version tag, per registry. The arches may
+  # ship different package versions (sury's arm64 index can lag amd64); that's
+  # logged as a warning and shown per arch in the Docker Hub overview.
   # --------------------------------------------------------------------------
   manifest:
     needs: [resolve, gate, build]
@@ -213,10 +209,8 @@ jobs:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
       - name: Check both arches ship the same packages
-        id: skew
         env:
           PHP_VERSION: ${{ matrix.php }}
-          ALLOW_SKEW: ${{ github.event.inputs.allow_skew }}
         run: |
           set -euo pipefail
           # name + version of every package in the per-arch SBOM; Debian binNMU
@@ -228,19 +222,11 @@ jobs:
           }
           if d=$(diff <(pkgs amd64) <(pkgs arm64)); then
             echo "amd64 and arm64 ship identical packages"
-            echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "$d"
-            if [ "$ALLOW_SKEW" = "true" ]; then
-              echo "::warning title=php ${PHP_VERSION} arch skew::amd64 and arm64 differ; publishing anyway (allow_skew=true)"
-              echo "ok=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "::warning title=php ${PHP_VERSION} arch skew::amd64 and arm64 differ; keeping the published :${PHP_VERSION} (see log)"
-              echo "ok=false" >> "$GITHUB_OUTPUT"
-            fi
+            echo "::warning title=php ${PHP_VERSION} arch skew::amd64 and arm64 differ; publishing anyway (see log and the Docker Hub overview)"
           fi
       - name: Create multi-arch manifest
-        if: steps.skew.outputs.ok == 'true'
         env:
           PHP_VERSION: ${{ matrix.php }}
         run: |
@@ -282,7 +268,7 @@ jobs:
   # README, plus the exact PHP/Apache package versions of every published tag,
   # read from its SBOM attestation (per arch when amd64 and arm64 differ). Runs
   # on every run, so the page always matches what is live — even when nothing
-  # was rebuilt or a tag was held for arch skew.
+  # was rebuilt.
   # --------------------------------------------------------------------------
   describe:
     needs: [resolve, manifest]
