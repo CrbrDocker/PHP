@@ -290,6 +290,19 @@ jobs:
         if: env.DOCKERHUB_USERNAME != ''
         run: |
           set -euo pipefail
+          # imagetools inspect with retries: a registry read right after a push can
+          # fail transiently, and a tag silently missing from the page is worse than
+          # a failed job (the previous overview then stays up).
+          inspect() {  # $1 = image ref, $2 = --format template
+            local i
+            for i in 1 2 3; do
+              docker buildx imagetools inspect "$1" --format "$2" && return 0
+              echo "inspect $1 failed (attempt $i/3)" >&2
+              sleep $((i * 10))
+            done
+            echo "::error::could not inspect $1" >&2
+            return 1
+          }
           out="${RUNNER_TEMP}/hub-overview.md"
           {
             echo "# apache-php"
@@ -319,11 +332,8 @@ jobs:
           versions=$(curl -sfL "https://hub.docker.com/v2/repositories/${DOCKERHUB_IMAGE}/tags?page_size=100" \
             | jq -r '.results[].name | select(test("^[0-9]+\\.[0-9]+$"))' | sort -rV)
           for v in $versions; do
-            if ! sbom=$(docker buildx imagetools inspect "${DOCKERHUB_IMAGE}:${v}" --format '{{ json .SBOM }}' 2>/dev/null); then
-              echo "no published ${DOCKERHUB_IMAGE}:${v}, skipped"
-              continue
-            fi
-            built=$(docker buildx imagetools inspect "${DOCKERHUB_IMAGE}:${v}" --format '{{ json .Image }}' \
+            sbom=$(inspect "${DOCKERHUB_IMAGE}:${v}" '{{ json .SBOM }}')
+            built=$(inspect "${DOCKERHUB_IMAGE}:${v}" '{{ json .Image }}' \
               | jq -r '[.[] | .config.Labels["org.opencontainers.image.created"] // empty] | max // "?" | .[0:10]')
             # One summary row: upstream PHP/Apache versions (epoch and Debian
             # revision stripped), source (sury builds carry a "+0~" revision),
