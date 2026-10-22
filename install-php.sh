@@ -19,19 +19,28 @@ cat > /etc/apt/sources.list.d/php-sury.list <<EOF
 # PHP recent
 deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ ${codename} main
 EOF
-# Prefer sury for every PHP package so an arch where Debian ships a newer php8.x
-# (e.g. trixie's own php8.4) never mixes package sources between arches.
-cat > /etc/apt/preferences.d/php-sury <<EOF
-Package: php* libapache2-mod-php*
-Pin: origin packages.sury.org
-Pin-Priority: 1001
-EOF
 
 # env var so APT knows we won't answer any of its prompts
 export DEBIAN_FRONTEND=noninteractive
 export DEBIAN_PRIORITY=critical
 
 apt -y update
+
+# Pick the PHP source: when Debian itself ships this PHP version (e.g. php8.4
+# on trixie, via -security), take it from Debian — same version on every arch,
+# Debian security support, no sury arm64 lag. Otherwise pin sury, so the two
+# sources are never mixed between arches.
+if apt-cache madison "php${PHP_VERSION}-cli" | grep -vq 'packages\.sury\.org'; then
+	php_pin="release o=Debian"
+else
+	php_pin="origin packages.sury.org"
+fi
+echo "install-php: PHP ${PHP_VERSION} packages pinned to: ${php_pin}" >&2
+cat > /etc/apt/preferences.d/php-sury <<EOF
+Package: php* libapache2-mod-php*
+Pin: ${php_pin}
+Pin-Priority: 1001
+EOF
 
 apt-get -y dist-upgrade
 

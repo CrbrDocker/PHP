@@ -21,7 +21,9 @@ the `MIN_PHP` repo variable or the `workflow_dispatch` `min_php` input.
 > Pre-releases (e.g. `8.6.0~rc3`) are not built unless the repo variable
 > `ALLOW_PRERELEASE` is `true`.
 
-All PHP packages are pinned to sury (never Debian's own `php8.x`), and both arches
+PHP packages come from **Debian** when Debian itself ships that PHP version (e.g.
+`php8.4` on trixie, security-supported, same version on every arch), otherwise from
+**sury**; extensions Debian lacks (e.g. `grpc`) still come from sury. Both arches
 must ship identical package versions: sury's arm64 index can lag amd64, so when the
 two differ the `:<ver>` tag keeps its last consistent image (with a workflow
 warning) until both arches catch up.
