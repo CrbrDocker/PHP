@@ -20,6 +20,10 @@ on:
         description: "Force rebuild even if the gate says nothing changed"
         type: boolean
         default: true
+      allow_skew:
+        description: "Publish even if amd64 and arm64 ship different package versions"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -36,7 +40,9 @@ jobs:
   # --------------------------------------------------------------------------
   # Resolve the PHP versions to build: read the current stable codename from
   # Debian's Release file, then list every php<maj>.<min> metapackage sury
-  # ships for that codename, keeping those >= MIN_PHP. Also lowercase the owner.
+  # ships for that codename, keeping those >= MIN_PHP. Pre-releases (sury
+  # version with "~", e.g. 8.6.0~rc3) are skipped unless repo var
+  # ALLOW_PRERELEASE=true. Also lowercase the owner.
   # --------------------------------------------------------------------------
   resolve:
     runs-on: ubuntu-24.04
@@ -45,18 +51,24 @@ jobs:
       owner: ${{ steps.r.outputs.owner }}
     env:
       MIN_PHP: ${{ github.event.inputs.min_php || vars.MIN_PHP || '8.3' }}
+      ALLOW_PRERELEASE: ${{ vars.ALLOW_PRERELEASE || 'false' }}
     steps:
       - id: r
         run: |
           set -euo pipefail
           codename=$(curl -sfL "https://deb.debian.org/debian/dists/stable/Release" | sed -n 's/^Codename: //p')
           [ -n "$codename" ] || { echo "could not resolve stable codename" >&2; exit 1; }
-          all=$(curl -sfL "https://packages.sury.org/php/dists/${codename}/main/binary-amd64/Packages.gz" \
-            | gunzip | sed -n 's/^Package: php\([0-9][0-9]*\.[0-9][0-9]*\)$/\1/p' | sort -uV)
+          idx=$(curl -sfL "https://packages.sury.org/php/dists/${codename}/main/binary-amd64/Packages.gz" | gunzip)
+          all=$(echo "$idx" | sed -n 's/^Package: php\([0-9][0-9]*\.[0-9][0-9]*\)$/\1/p' | sort -uV)
           keep=()
           for v in $all; do
             # keep v when MIN_PHP sorts first, i.e. v >= MIN_PHP (version-aware)
             if [ "$(printf '%s\n%s\n' "$MIN_PHP" "$v" | sort -V | head -n1)" = "$MIN_PHP" ]; then
+              pv=$(echo "$idx" | awk -v p="php${v}-cli" '$1=="Package:"{f=($2==p)} f&&$1=="Version:"{print $2; exit}')
+              if [[ "$pv" == *"~"* ]] && [ "$ALLOW_PRERELEASE" != "true" ]; then
+                echo "skipping php ${v}: pre-release ${pv}"
+                continue
+              fi
               keep+=("$v")
             fi
           done
@@ -170,7 +182,9 @@ jobs:
             --build-arg "BASE_DIGEST=${base_digest}"
 
   # --------------------------------------------------------------------------
-  # Merge the per-arch tags into the version tag, per registry.
+  # Merge the per-arch tags into the version tag, per registry — unless the two
+  # arches ship different package versions (sury's arm64 index can lag amd64),
+  # in which case :<ver> keeps its last consistent image until the next run.
   # --------------------------------------------------------------------------
   manifest:
     needs: [resolve, gate, build]
@@ -198,7 +212,35 @@ jobs:
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
+      - name: Check both arches ship the same packages
+        id: skew
+        env:
+          PHP_VERSION: ${{ matrix.php }}
+          ALLOW_SKEW: ${{ github.event.inputs.allow_skew }}
+        run: |
+          set -euo pipefail
+          # name + version of every package in the per-arch SBOM; Debian binNMU
+          # suffixes (+bN, arch-only rebuilds of the same source) are ignored.
+          pkgs() {  # $1 = arch
+            docker buildx imagetools inspect "${GHCR_IMAGE}:${PHP_VERSION}-$1" --format '{{ json .SBOM }}' \
+              | jq -r '.SPDX.packages[] | "\(.name) \(.versionInfo // "")"' \
+              | sed -E 's/\+b[0-9]+$//' | sort -u
+          }
+          if d=$(diff <(pkgs amd64) <(pkgs arm64)); then
+            echo "amd64 and arm64 ship identical packages"
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$d"
+            if [ "$ALLOW_SKEW" = "true" ]; then
+              echo "::warning title=php ${PHP_VERSION} arch skew::amd64 and arm64 differ; publishing anyway (allow_skew=true)"
+              echo "ok=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::warning title=php ${PHP_VERSION} arch skew::amd64 and arm64 differ; keeping the published :${PHP_VERSION} (see log)"
+              echo "ok=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
       - name: Create multi-arch manifest
+        if: steps.skew.outputs.ok == 'true'
         env:
           PHP_VERSION: ${{ matrix.php }}
         run: |

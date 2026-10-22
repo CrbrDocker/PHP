@@ -15,8 +15,16 @@ at or above `MIN_PHP` (default `8.3`). New minor versions are picked up
 automatically; a version that sury drops stops building. Override the floor with
 the `MIN_PHP` repo variable or the `workflow_dispatch` `min_php` input.
 
-> Note: a version (or one of its extensions) that sury has not published yet will
-> fail its build; `fail-fast: false` keeps the other versions publishing.
+> Note: an extension sury does not ship for a version (e.g. `opcache`, built into
+> PHP ≥ 8.5) is skipped at build time; a version missing Apache, `mod_php` or the
+> CLI fails its build, and `fail-fast: false` keeps the other versions publishing.
+> Pre-releases (e.g. `8.6.0~rc3`) are not built unless the repo variable
+> `ALLOW_PRERELEASE` is `true`.
+
+All PHP packages are pinned to sury (never Debian's own `php8.x`), and both arches
+must ship identical package versions: sury's arm64 index can lag amd64, so when the
+two differ the `:<ver>` tag keeps its last consistent image (with a workflow
+warning) until both arches catch up.
 
 ## Usage
 
@@ -131,12 +139,15 @@ Everything is driven by `.github/workflows/build.yml`:
 3. **build** — matrix `version × {amd64→ubuntu-24.04, arm64→ubuntu-24.04-arm}`,
    **native, no QEMU**; `docker buildx build` (with `PHP_VERSION` build-arg) pushes
    an OCI `:<ver>-<arch>` image (provenance + SBOM) to both registries.
-4. **manifest** — merge the per-arch tags into `:<ver>`.
+4. **manifest** — compare the per-arch SBOMs (ignoring Debian `+bN` binNMU
+   suffixes); if they match, merge the per-arch tags into `:<ver>`, otherwise keep
+   the published `:<ver>` and warn.
 5. **cleanup** — prune untagged GHCR versions.
 
 Triggers: any push to `main`, weekly `cron 50 8 * * 2`, or manual *Run workflow*
 (optional `min_php`; `force` toggle, default on, builds all resolved versions
-even when the gate sees no change).
+even when the gate sees no change; `allow_skew` toggle, default off, publishes
+even when amd64 and arm64 package versions differ).
 
 `install-php.sh` is copied into the image and run once at build time; it takes the
 target version from `$PHP_VERSION` and derives the sury repo codename from the base

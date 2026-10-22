@@ -19,6 +19,13 @@ cat > /etc/apt/sources.list.d/php-sury.list <<EOF
 # PHP recent
 deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ ${codename} main
 EOF
+# Prefer sury for every PHP package so an arch where Debian ships a newer php8.x
+# (e.g. trixie's own php8.4) never mixes package sources between arches.
+cat > /etc/apt/preferences.d/php-sury <<EOF
+Package: php* libapache2-mod-php*
+Pin: origin packages.sury.org
+Pin-Priority: 1001
+EOF
 
 # env var so APT knows we won't answer any of its prompts
 export DEBIAN_FRONTEND=noninteractive
@@ -29,10 +36,26 @@ apt -y update
 apt-get -y dist-upgrade
 
 # Installation apache & modules
-apt-get -y --no-install-recommends install apache2 openssl libapache2-mod-php${PHP_VERSION} php${PHP_VERSION}-apcu php${PHP_VERSION}-bcmath php${PHP_VERSION}-bz2 php${PHP_VERSION}-cli php${PHP_VERSION}-common php${PHP_VERSION}-curl php${PHP_VERSION}-dba php${PHP_VERSION}-gd php${PHP_VERSION}-grpc php${PHP_VERSION}-igbinary php${PHP_VERSION}-imagick php${PHP_VERSION}-ldap php${PHP_VERSION}-mbstring php${PHP_VERSION}-memcached php${PHP_VERSION}-memcache php${PHP_VERSION}-msgpack php${PHP_VERSION}-mysql php${PHP_VERSION}-odbc php${PHP_VERSION}-opcache php${PHP_VERSION}-readline php${PHP_VERSION}-redis php${PHP_VERSION}-soap php${PHP_VERSION}-sqlite3 php${PHP_VERSION}-sybase php${PHP_VERSION}-tidy php${PHP_VERSION}-xml php${PHP_VERSION}-xmlrpc php${PHP_VERSION}-zip php-common
+pkgs="apache2 openssl libapache2-mod-php${PHP_VERSION} php${PHP_VERSION}-apcu php${PHP_VERSION}-bcmath php${PHP_VERSION}-bz2 php${PHP_VERSION}-cli php${PHP_VERSION}-common php${PHP_VERSION}-curl php${PHP_VERSION}-dba php${PHP_VERSION}-gd php${PHP_VERSION}-grpc php${PHP_VERSION}-igbinary php${PHP_VERSION}-imagick php${PHP_VERSION}-ldap php${PHP_VERSION}-mbstring php${PHP_VERSION}-memcached php${PHP_VERSION}-memcache php${PHP_VERSION}-msgpack php${PHP_VERSION}-mysql php${PHP_VERSION}-odbc php${PHP_VERSION}-opcache php${PHP_VERSION}-readline php${PHP_VERSION}-redis php${PHP_VERSION}-soap php${PHP_VERSION}-sqlite3 php${PHP_VERSION}-sybase php${PHP_VERSION}-tidy php${PHP_VERSION}-xml php${PHP_VERSION}-xmlrpc php${PHP_VERSION}-zip php-common"
+# Skip packages sury doesn't ship for this version (e.g. opcache is built into
+# PHP >= 8.5) instead of letting one missing name abort the whole install.
+avail=""
+for p in $pkgs; do
+	if apt-cache show "$p" >/dev/null 2>&1; then
+		avail="$avail $p"
+	else
+		echo "install-php: $p not available for PHP ${PHP_VERSION}, skipped" >&2
+	fi
+done
+apt-get -y --no-install-recommends install $avail || exit 1
 
 # While we're at it, composer too ... (it needs php8.3-intl, otherwise it pulls php8.4-intl & php8.4-common...)
-apt-get -y --no-install-recommends install php${PHP_VERSION}-intl composer
+apt-get -y --no-install-recommends install php${PHP_VERSION}-intl composer || exit 1
+
+# Never seal an image without Apache + mod_php + the requested PHP
+for p in apache2 libapache2-mod-php${PHP_VERSION} php${PHP_VERSION}-cli; do
+	dpkg -s "$p" >/dev/null 2>&1 || { echo "install-php: required package $p is not installed" >&2; exit 1; }
+done
 
 
 # APT cache cleanup
